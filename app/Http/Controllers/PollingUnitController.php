@@ -6,6 +6,8 @@ use App\Models\Lga;
 use App\Models\Party;
 use App\Models\PollingUnit;
 use App\Models\State;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Request;
 use Inertia\Inertia;
 
 class PollingUnitController extends Controller
@@ -102,52 +104,5 @@ class PollingUnitController extends Controller
             'pollingUnit' => $results,
             'total' => (int) $total,
         ]);
-    }
-
-    public function pollingForm(Request $request)
-    {
-        $stateId = $request->integer('state_id');
-        $lgaId = $request->integer('lga_id');
-        $wardId = $request->integer('ward_id');
-
-        return Inertia::render('polling-form', [
-            'states' => State::orderBy('state_name')->get(['state_id', 'state_name']),
-            'lgas' => $stateId ? Lga::where('state_id', $stateId)->orderBy('lga_name')->get(['lga_id', 'lga_name']) : [],
-            'wards' => $lgaId ? Ward::where('lga_id', $lgaId)->orderBy('ward_name')->get(['ward_id', 'ward_name']) : [],
-            'units' => $wardId ? PollingUnit::where('lga_id', $lgaId)->where('ward_id', $wardId)->orderBy('polling_unit_name')->get(['uniqueid', 'polling_unit_name', 'polling_unit_number']) : [],
-            'parties' => Party::orderBy('partyid')->get(['partyid', 'partyname']),
-        ]);
-    }
-
-    public function storePollingForm(Request $request)
-    {
-        $partyIds = Party::pluck('partyid')->all();
-
-        $validated = $request->validate([
-            'state_id' => ['required', 'integer'],
-            'unit_id' => ['required', 'exists:polling_unit,uniqueid'],
-            'scores' => ['required', 'array'],
-            'scores.*' => ['required', 'integer', 'min:0', 'max:100000'],
-        ]);
-
-        abort_if(collect($validated['scores'])->keys()->diff($partyIds)->isNotEmpty(), 422, 'Unknown party submitted.');
-
-        $unit = PollingUnit::where('uniqueid', $validated['unit_id'])->firstOrFail();
-
-        DB::transaction(function () use ($validated, $unit, $request) {
-            foreach ($validated['scores'] as $party => $score) {
-                $unit->announcedResults()->updateOrCreate(
-                    ['party_abbreviation' => $party],
-                    ['party_score' => $score, 'entered_by_user' => $request->user()?->name ?? 'system', 'date_entered' => now(), 'user_ip_address' => $request->ip()],
-                );
-            }
-        });
-
-        return redirect()->route('bicon.show', ['state' => $validated['state_id'], 'lga' => $unit->lga_id, 'ward' => $unit->ward_id, 'unit' => $unit->polling_unit_id])->with('success', 'Results saved.');
-    }
-
-    public function storePolling()
-    {
-        return Inertia::render('polling-form', []);
     }
 }
